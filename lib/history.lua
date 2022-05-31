@@ -41,6 +41,7 @@ function _M.init()
             uri TEXT,
             title TEXT,
             visits INTEGER,
+            parent_id INTEGER,
             last_visit INTEGER
         );
     ]]
@@ -55,12 +56,13 @@ function _M.init()
 
     query_insert = _M.db:compile [[
         INSERT INTO history
-        VALUES (NULL, ?, ?, ?, ?)
+        VALUES (NULL, ?, ?, ?, ?, ?)
     ]]
 
     query_update_visits = _M.db:compile [[
         UPDATE history
-        SET visits = visits + 1, last_visit = ?
+        SET visits = visits + 1, last_visit = ?,
+        parent_id = ?
         WHERE id = ?
     ]]
 
@@ -76,10 +78,11 @@ luakit.idle_add(_M.init)
 --- Add a URI to the user's history.
 -- @tparam string uri The URI to add to the user's history.
 -- @tparam string title The title to associate with the URI.
+-- @tparam [opt] string parent_uri The refferal URI. Empty string if no refferal
 -- @tparam[opt] boolean update_visits `false` if the last visit time for this URI
 -- should not be updated.
 -- @default `true`
-function _M.add(uri, title, update_visits)
+function _M.add(uri, title, parent_uri, update_visits)
     if not _M.db then _M.init() end
 
     -- Ignore blank uris
@@ -91,15 +94,25 @@ function _M.add(uri, title, update_visits)
 
     -- Find existing item
     local item = (query_find_last:exec{uri})[1]
+
+    -- Find parent uri in history table (theoretically it should always be find)
+    local parent_id = 0
+    if parent_uri then
+        parent_uri = (query_find_last:exec{parent_uri})[1]
+        if parent_uri then
+            parent_id = parent_uri.id
+        end
+    end
+
     if item then
         if update_visits ~= false then
-            query_update_visits:exec{os.time(), item.id}
+            query_update_visits:exec{os.time(), item.id, parent_id}
         end
         if title then
             query_update_title:exec{title, item.id}
         end
     else
-        query_insert:exec{uri, title, 1, os.time()}
+        query_insert:exec{uri, title, 1, parent_id, os.time()}
     end
 end
 
@@ -125,7 +138,14 @@ webview.add_signal("init", function (view)
 
         local title = view.title
         if title and title ~= "" then
-            _M.add(view.uri, title, false)
+
+            local parent_uri = false
+            -- check if there is an ancestor
+            if view.history and view.history.index > 1 then
+                -- get the refferal url (current uri - 1)
+                parent_uri = view.history.items[view.history.index - 1].uri
+            end
+            _M.add(view.uri, title, parent_uri, false)
         end
     end)
 end)
