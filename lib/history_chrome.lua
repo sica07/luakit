@@ -309,6 +309,7 @@ window.addEventListener('load', () => {
             limit: limit,
             page: parseInt($page.value, 10)
         }).then(results => {
+            globalHistory, globalHistoryTree = [];
             resultsLen = results.length || 0
             updateClearButtons(query, !query, true)
             empty($results)
