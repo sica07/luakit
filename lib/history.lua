@@ -47,7 +47,7 @@ function _M.init()
     ]]
 
     query_find_last = _M.db:compile [[
-        SELECT id
+        SELECT id, parent_id
         FROM history
         WHERE uri = ?
         ORDER BY last_visit DESC
@@ -93,7 +93,7 @@ function _M.add(uri, title, parent_uri, update_visits)
     if _M.emit_signal("add", uri, title) == false then return end
 
     -- Find existing item
-    local item = (query_find_last:exec{uri})[1]
+    local existing_url = (query_find_last:exec{uri})[1]
 
     -- Find parent uri in history table (theoretically it should always be find)
     local parent_id = 0
@@ -104,14 +104,20 @@ function _M.add(uri, title, parent_uri, update_visits)
         end
     end
 
-    if item then
-        if update_visits ~= false then
-            query_update_visits:exec{os.time(), item.id, parent_id}
-        end
-        if title then
-            query_update_title:exec{title, item.id}
-        end
-    else
+     if existing_url then
+         if update_visits ~= false then
+            -- parent_ids are identical when going back or forward in history tree (go_back() or go_forward())
+            -- in which case we don't want to modify the history tree
+            if existing_url.parent_id == parent_id then
+               query_update_visits:exec{os.time(), existing_url.id, parent_id}
+            else
+               query_insert:exec{uri, existing_url.title, 1, parent_id, os.time()}
+            end
+         end
+         if title then
+             query_update_title:exec{title, existing_url.id}
+         end
+     else
         query_insert:exec{uri, title, 1, parent_id, os.time()}
     end
 end
@@ -135,7 +141,7 @@ webview.add_signal("init", function (view)
                 -- get the refferal url (current uri - 1)
                 parent_uri = view.history.items[view.history.index - 1].uri
             end
-            _M.add(view.uri, '', parent_uri)
+            _M.add(view.uri, false, parent_uri)
         end
     end)
     -- Update titles

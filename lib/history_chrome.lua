@@ -202,8 +202,7 @@ window.addEventListener('load', () => {
         } else {
             div += `<span class="time">${h.time}</span>`
         }
-
-        div += `<span class="title">
+        div += `<span class="title" title="${escapeHTML(h.uri)}">
                     <a href="${
             h.uri}">${escapeHTML(h.title || h.uri)}</a>
                 </span>
