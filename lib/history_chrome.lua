@@ -54,6 +54,13 @@ _M.stylesheet = [===[
     padding-right: 0.5em;
     margin-right: 0.1em;
 }
+.item .root {
+    border-left: 1px solid #ddd;
+}
+.item .descendant {
+    color: #888;
+    font-size: larger;
+}
 
 .item a {
     text-decoration: none;
@@ -96,6 +103,7 @@ local html_template = [==[
 <body>
     <header id="page-header">
         <h1>History</h1>
+        <input type="button" id="toggle-history-tree" class="button" style="margin-right: 0.5em; width: 5em;" value="Tree" />
         <span id="search-box">
             <input type="text" id="search" placeholder="Search history..." />
             <input type="button" class="button" id="clear-button" value="✕" />
@@ -149,6 +157,7 @@ function empty ($el) {
 window.addEventListener('load', () => {
     const limit = 100
     let resultsLen = 0
+    const $historyTree = document.getElementById('toggle-history-tree')
     const $clearAll = document.getElementById('clear-all-button')
     const $clearResults = document.getElementById('clear-results-button')
     const $clearSelected = document.getElementById('clear-selected-button')
@@ -157,10 +166,12 @@ window.addEventListener('load', () => {
     const $prev = document.getElementById('nav-prev')
     const $results = document.getElementById('results')
     const $search = document.getElementById('search')
+    let historyTreeOn = false;
+    let globalHistory = [];
+    let globalHistoryTree = [];
 
     $page.value = $page.value || 1
-
-    function makeHistoryItem (h) {
+    function makeHistoryItem (h, indent_level) {
         let domain = /https?:\/\/([^/]+)\//.exec(h.uri)
         domain = domain ? domain[1] : ''
 
@@ -172,17 +183,40 @@ window.addEventListener('load', () => {
             return String(string).replace(/[&<>"'`=\/]/g, s => entityMap[s]);
         }
 
-        return `
-            <div class=item data-id="${h.id}">
-                <span class=time>${h.time}</span>
-                <span class=title>
-                    <a href="${h.uri}">${escapeHTML(h.title || h.uri)}</a>
+
+        let div = `<div class=item data-id="${h.id}">`;
+        if (historyTreeOn) {
+            let margin  = 0;
+            let indent = '';
+            let root_class = 'root';
+
+            if (indent_level) {
+                margin = indent_level-.8;
+                indent = `&#x21b3;`;
+                root_class = ''
+            }
+            div += `
+                <span class="descendant" style="padding-left:${margin}em;">${indent}</span>
+                <span class="time ${root_class}">${h.time}</span>
+            `
+        } else {
+            div += `<span class="time">${h.time}</span>`
+        }
+
+        div += `<span class="title">
+                    <a href="${
+            h.uri}">${escapeHTML(h.title || h.uri)}</a>
                 </span>
                 <span class=domain>
-                    <a href=#>${domain}</a>
+                    <a href=#>${
+
+            domain}</a>
                 </span>
             </div>
         `
+
+        return div;
+
 
         // return createElement('div', { class: 'item', 'data-id': h.id }, [
 
@@ -214,6 +248,14 @@ window.addEventListener('load', () => {
         // })
     }
 
+    function drawDescendants(descendants, indentLevel) {
+            return descendants.map((descendant, i) => {
+                        let html = makeHistoryItem(descendant.data, indentLevel)
+                        html += drawDescendants(descendant.descendants, (indentLevel + 1))
+                        return html;
+                    }).join('')
+    }
+
     function updateClearButtons (all, results, selected) {
         $clearAll.disabled = !!all
         $clearResults.disabled = !!results
@@ -226,6 +268,41 @@ window.addEventListener('load', () => {
     }
 
     function search () {
+        class TreeNode {
+                constructor(data) {
+                this.id = data.id;
+                this.data = data;
+                this.descendants = [];
+                }
+            }
+
+        function addDescendantsToTree(id, parent_id, tree) {
+            if (!tree['id_' + parent_id]) {
+                tree['id_' + parent_id] = new TreeNode({id: parent_id});
+            }
+            tree['id_' + parent_id].descendants.push(tree['id_' + id]);
+
+            return tree;
+        }
+
+        function buildResultsTree(results) {
+            let resultsTree = [];
+
+            results.map((item, i) => {
+                if (!resultsTree['id_' + item.id]) {
+                        resultsTree['id_' + item.id] = new TreeNode(item);
+                } else {
+                    resultsTree['id_' + item.id].data = item;
+                }
+
+                if (item.parent_id > 0) {
+                    resultsTree = addDescendantsToTree(item.id, item.parent_id, resultsTree);
+                }
+            });
+
+            return resultsTree;
+        }
+
         let query = $search.value
         history_search({
             query: query,
@@ -241,16 +318,46 @@ window.addEventListener('load', () => {
                 return
             }
 
-            $results.innerHTML = results.map((item, i) => {
-                let lastItem = results[i - 1] || {}
-                let html = item.date !== lastItem.date ? `<div class=day-heading>${item.date}</div>`
-                    : (lastItem.last_visit - item.last_visit) > 3600 ? `<div class=day-sep></div>`
-                    : "";
-                return html + makeHistoryItem(item)
-            }).join('')
+            let results_tree = buildResultsTree(results);
+            for(i in results_tree) {
+                if (results_tree[i].data.parent_id == 0) {
+                    globalHistoryTree.push(results_tree[i]);
+                }
+            }
+
+            globalHistory = results;
+
+            displayGlobalHistory();
 
             updateNavButtons()
         })
+    }
+
+    function displayGlobalHistory() {
+        $results.innerHTML = globalHistory.map((item, i) => {
+             let lastItem = globalHistory[i - 1] || {}
+             let html = item.date !== lastItem.date ? `<div class=day-heading>${item.date}</div>`
+                 : (lastItem.last_visit - item.last_visit) > 3600 ? `<div class=day-sep></div>`
+                 : "";
+             return html + makeHistoryItem(item)
+         }).join('')
+    }
+
+    function displayGlobalHistoryTree() {
+        $results.innerHTML = globalHistoryTree.map((item, i) => {
+                let descendants = item.descendants
+                item = item.data
+                let html =`<div style="margin-top: 1em;"></div>`;
+                if (globalHistoryTree[i - 1]) {
+                    let lastItem = globalHistoryTree[i - 1];
+                    html = item.date !== lastItem.data.date ? `<div class=day-heading>${item.date}</div>`
+                        : (lastItem.data.last_visit - item.last_visit) > 3600 ? `<div class=day-sep></div>`
+                        : `<div style="margin-top: 1em;"></div>`;
+                }
+                html += makeHistoryItem(item);
+                html += drawDescendants(descendants, 1)
+                return html;
+        }).join('');
     }
 
     function clearEls (className) {
@@ -283,6 +390,18 @@ window.addEventListener('load', () => {
             $page.value = 1
             search()
         })
+
+    $historyTree.addEventListener('click', (e) => {
+        if (!historyTreeOn) {
+            historyTreeOn = true;
+            e.target.value = "List";
+            displayGlobalHistoryTree();
+        } else {
+            historyTreeOn = false;
+            e.target.value = "Tree";
+            displayGlobalHistory();
+        }
+    });
 
     $clearAll.addEventListener('click', () => {
         if (!window.confirm('Clear all browser history?')) return

@@ -124,11 +124,18 @@ _M.frozen = setmetatable({}, { __mode = "k" })
 webview.add_signal("init", function (view)
     -- Add items & update visit count
     view:add_signal("load-status", function (_, status)
+
         if view.private then return end
         if _M.frozen[view] then return end
 
         if status == "committed" then
-            _M.add(view.uri)
+            local parent_uri = false
+            -- check if there is an ancestor
+            if view.history and view.history.index > 1 then
+                -- get the refferal url (current uri - 1)
+                parent_uri = view.history.items[view.history.index - 1].uri
+            end
+            _M.add(view.uri, '', parent_uri)
         end
     end)
     -- Update titles
@@ -138,14 +145,8 @@ webview.add_signal("init", function (view)
 
         local title = view.title
         if title and title ~= "" then
-
-            local parent_uri = false
-            -- check if there is an ancestor
-            if view.history and view.history.index > 1 then
-                -- get the refferal url (current uri - 1)
-                parent_uri = view.history.items[view.history.index - 1].uri
-            end
-            _M.add(view.uri, title, parent_uri, false)
+            -- should we update the parent_uri too?
+            _M.add(view.uri, title, 0, false)
         end
     end)
 end)
